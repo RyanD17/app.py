@@ -1,47 +1,9 @@
 from shiny import App, ui, render, reactive, run_app
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Rectangle, Arc
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 import matplotlib.lines as mlines
-from matplotlib.legend_handler import HandlerBase
 import pandas as pd
 import numpy as np
-import requests
-from io import BytesIO
-
-# --- NBA Team Logos (official NBA CDN PNGs, as of 2024-25) ---
-TEAM_LOGO_URLS = {
-    "Atlanta Hawks":        "https://cdn.nba.com/logos/nba/1610612737/primary/L/logo.png",
-    "Boston Celtics":       "https://cdn.nba.com/logos/nba/1610612738/primary/L/logo.png",
-    "Brooklyn Nets":        "https://cdn.nba.com/logos/nba/1610612751/primary/L/logo.png",
-    "Charlotte Hornets":    "https://cdn.nba.com/logos/nba/1610612766/primary/L/logo.png",
-    "Chicago Bulls":        "https://cdn.nba.com/logos/nba/1610612741/primary/L/logo.png",
-    "Cleveland Cavaliers":  "https://cdn.nba.com/logos/nba/1610612739/primary/L/logo.png",
-    "Dallas Mavericks":     "https://cdn.nba.com/logos/nba/1610612742/primary/L/logo.png",
-    "Denver Nuggets":       "https://cdn.nba.com/logos/nba/1610612743/primary/L/logo.png",
-    "Detroit Pistons":      "https://cdn.nba.com/logos/nba/1610612765/primary/L/logo.png",
-    "Golden State Warriors":"https://cdn.nba.com/logos/nba/1610612744/primary/L/logo.png",
-    "Houston Rockets":      "https://cdn.nba.com/logos/nba/1610612745/primary/L/logo.png",
-    "Indiana Pacers":       "https://cdn.nba.com/logos/nba/1610612754/primary/L/logo.png",
-    "Los Angeles Clippers": "https://cdn.nba.com/logos/nba/1610612746/primary/L/logo.png",
-    "Los Angeles Lakers":   "https://cdn.nba.com/logos/nba/1610612747/primary/L/logo.png",
-    "Memphis Grizzlies":    "https://cdn.nba.com/logos/nba/1610612763/primary/L/logo.png",
-    "Miami Heat":           "https://cdn.nba.com/logos/nba/1610612748/primary/L/logo.png",
-    "Milwaukee Bucks":      "https://cdn.nba.com/logos/nba/1610612749/primary/L/logo.png",
-    "Minnesota Timberwolves":"https://cdn.nba.com/logos/nba/1610612750/primary/L/logo.png",
-    "New Orleans Pelicans": "https://cdn.nba.com/logos/nba/1610612740/primary/L/logo.png",
-    "New York Knicks":      "https://cdn.nba.com/logos/nba/1610612752/primary/L/logo.png",
-    "Oklahoma City Thunder":"https://cdn.nba.com/logos/nba/1610612760/primary/L/logo.png",
-    "Orlando Magic":        "https://cdn.nba.com/logos/nba/1610612753/primary/L/logo.png",
-    "Philadelphia 76ers":   "https://cdn.nba.com/logos/nba/1610612755/primary/L/logo.png",
-    "Phoenix Suns":         "https://cdn.nba.com/logos/nba/1610612756/primary/L/logo.png",
-    "Portland Trail Blazers":"https://cdn.nba.com/logos/nba/1610612757/primary/L/logo.png",
-    "Sacramento Kings":     "https://cdn.nba.com/logos/nba/1610612758/primary/L/logo.png",
-    "San Antonio Spurs":    "https://cdn.nba.com/logos/nba/1610612759/primary/L/logo.png",
-    "Toronto Raptors":      "https://cdn.nba.com/logos/nba/1610612761/primary/L/logo.png",
-    "Utah Jazz":            "https://cdn.nba.com/logos/nba/1610612762/primary/L/logo.png",
-    "Washington Wizards":   "https://cdn.nba.com/logos/nba/1610612764/primary/L/logo.png"
-}
 
 def draw_nba_court(ax=None, color='black', lw=2):
     if ax is None:
@@ -139,17 +101,6 @@ app_ui = ui.page_fluid(
     )
 )
 
-def get_team_logo(team_name):
-    url = TEAM_LOGO_URLS.get(team_name)
-    if url is None:
-        return None
-    try:
-        response = requests.get(url)
-        img = plt.imread(BytesIO(response.content))
-        return img
-    except Exception:
-        return None
-
 def server(input, output, session):
     def get_player_shots(player):
         player_data = data[data["PLAYER"] == player]
@@ -166,57 +117,44 @@ def server(input, output, session):
         draw_nba_court(ax)
         players = []
         colors = ['blue', 'red']
+        seen_players = set()
         for idx, player_input in enumerate([input.player1(), input.player2()]):
-            if player_input:
+            if player_input and player_input not in seen_players:
                 df = get_player_shots(player_input)
                 if not df.empty:
                     color = colors[idx]
                     ax.scatter(df["COURT_X"], df["COURT_Y"], s=120, color=color, edgecolor='black', alpha=0.8, label=player_input)
                     players.append((player_input, df["TEAM"].iloc[0], color))
-        # Custom legend with logos or fallback markers
+                    seen_players.add(player_input)
+        # Legend: just colored markers, no logos
         handles = []
         legend_labels = []
         for player_name, team, color in players:
-            logo_img = get_team_logo(team)
-            if logo_img is not None:
-                imagebox = OffsetImage(logo_img, zoom=0.08)
-                ab = AnnotationBbox(imagebox, (0, 0), frameon=False)
-                handles.append(ab)
-                legend_labels.append(f"{player_name} ({team})")
-            else:
-                fallback = mlines.Line2D([], [], color=color, marker='o', linestyle='None',
-                                         markersize=10, label=f"{player_name} ({team})")
-                handles.append(fallback)
-                legend_labels.append(f"{player_name} ({team})")
-
-        class HandlerLogo(HandlerBase):
-            def create_artists(self, legend, orig_handle, xdescent, ydescent, width, height, fontsize, trans):
-                if isinstance(orig_handle, AnnotationBbox):
-                    ab = orig_handle
-                    ab.xybox = (width/2, height/2)
-                    ab.set_transform(trans)
-                    return [ab]
-                return [orig_handle]
-
+            fallback = mlines.Line2D([], [], color=color, marker='o', linestyle='None',
+                                     markersize=10, label=f"{player_name} ({team})")
+            handles.append(fallback)
+            legend_labels.append(f"{player_name} ({team})")
         if handles:
             ax.legend(handles=handles, labels=legend_labels,
-                      handler_map={AnnotationBbox: HandlerLogo()},
-                      loc='upper center', bbox_to_anchor=(0.5, 1.08), ncol=2)
+                      loc='upper center', bbox_to_anchor=(0.5, 0.93), ncol=2)
         ax.set_xlim(-25, 25)
         ax.set_ylim(-5, 47)
         ax.set_title("NBA Shot Chart: Two Players", fontsize=16, pad=20)
-        ax.text(0, -3, "Origin (0,0) at hoop | Circles=Made, X=Missed", ha='center', fontsize=10, style='italic')
+        ax.text(0.5, -0.08, "Origin (0,0) at hoop | Circles=Made, X=Missed",
+                ha='center', fontsize=10, style='italic', transform=ax.transAxes)
         return fig
 
     @output
     @render.table
     def shot_summary():
         summaries = []
+        seen_players = set()
         for player in [input.player1(), input.player2()]:
-            if player:
+            if player and player not in seen_players:
                 df = get_player_shots(player)
                 if not df.empty:
                     summaries.append(calculate_shot_summary(df))
+                    seen_players.add(player)
         if not summaries:
             return None
         summary_df = pd.DataFrame(summaries)
